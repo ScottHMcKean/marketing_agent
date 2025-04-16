@@ -42,7 +42,6 @@ genie_agent = GenieAgent(
     ),
 )
 
-
 ############################################
 # Define your LLM endpoint and system prompt
 ############################################
@@ -57,7 +56,10 @@ llm = ChatDatabricks(endpoint=LLM_ENDPOINT_NAME)
 ############################################################
 tools = []
 
-uc_tool_names = ['shm.marketing.campaign_search']
+uc_tool_names = [
+    'shm.marketing.campaign_search',
+    'shm.marketing.campaign_summary'
+    ]
 uc_toolkit = UCFunctionToolkit(function_names=uc_tool_names)
 tools.extend(uc_toolkit.tools)
 creator_agent_description = (
