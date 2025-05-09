@@ -22,20 +22,18 @@ from mlflow.types.agent import (
     ChatContext,
 )
 from pydantic import BaseModel
+from mlflow.models import ModelConfig
+
+config = ModelConfig(development_config="config.yaml").to_dict()
 
 ###################################################
 ## Create a GenieAgent with access to a Genie Space
 ###################################################
 
-# TODO add GENIE_SPACE_ID and a description for this space
-# You can find the ID in the URL of the genie room /genie/rooms/<GENIE_SPACE_ID>
-GENIE_SPACE_ID = "01f018e761531cb190d829f8d347d48f"
-genie_agent_description = "This genie agent can answer questions about marketing campaigns including click through rates, emails, and marketing slogans"
-
 genie_agent = GenieAgent(
-    genie_space_id=GENIE_SPACE_ID,
+    genie_space_id=config['genie_space_id'],
     genie_agent_name="Genie",
-    description=genie_agent_description,
+    description=config['genie_agent_description'],
     client=WorkspaceClient(
         host=os.getenv("DB_MODEL_SERVING_HOST_URL"),
         token=os.getenv("DATABRICKS_GENIE_PAT"),
@@ -46,45 +44,43 @@ genie_agent = GenieAgent(
 # Define your LLM endpoint and system prompt
 ############################################
 
-# TODO: Replace with your model serving endpoint
-# multi-agent Genie works best with claude 3.7 or gpt 4o models.
-LLM_ENDPOINT_NAME = "databricks-claude-3-7-sonnet"
-llm = ChatDatabricks(endpoint=LLM_ENDPOINT_NAME)
+llm = ChatDatabricks(endpoint=config['fm_endpoint_name'])
 
 ############################################################
-# You can also create agents with access to additional tools
+# REACT Tool Calling Agent
 ############################################################
+catalog = config['catalog']
+schema = config['schema']
+
 tools = []
-
 uc_tool_names = [
-    'shm.marketing.campaign_search',
-    'shm.marketing.campaign_summary'
+    f'{catalog}.{schema}.campaign_search',
+    f'{catalog}.{schema}.campaign_total'
     ]
 uc_toolkit = UCFunctionToolkit(function_names=uc_tool_names)
 tools.extend(uc_toolkit.tools)
-creator_agent_description = (
-    "This agent generates new marketing slogans and campaign ideas inspired by previous campaigns.",
-)
+
 creator_agent = create_react_agent(llm, tools=tools)
 
 #############################
 # Define the supervisor agent
 #############################
 
-# TODO update the max number of iterations between supervisor and worker nodes
+# Max iterations between supervisor and worker nodes
 # before returning to the user
-MAX_ITERATIONS = 3
+MAX_ITERATIONS = config['max_supervisor_worker_iterations']
 
 worker_descriptions = {
-    "Genie": genie_agent_description,
-    "Creator": creator_agent_description,
+    "Genie": config['genie_agent_description'],
+    "Creator": config['creator_agent_description'],
 }
 
 formatted_descriptions = "\n".join(
     f"- {name}: {desc}" for name, desc in worker_descriptions.items()
 )
 
-system_prompt = f"Decide between routing between the following workers or ending the conversation if an answer is provided. If the user asks about historical info, opens, or how previous campaigns have performed use the Genie worker. If the user asks about creating new campaigns use the Creator worker. \n{formatted_descriptions}"
+system_prompt = f"{config['supervisor_agent_prompt']} \n{formatted_descriptions}"
+
 options = ["FINISH"] + list(worker_descriptions.keys())
 FINISH = {"next_node": "FINISH"}
 
@@ -135,14 +131,20 @@ def final_answer(state):
     final_answer_chain = preprocessor | llm
     return {"messages": [final_answer_chain.invoke(state)]}
 
-
 class AgentState(ChatAgentState):
     next_node: str
     iteration_count: int
 
 
-creator_node = functools.partial(agent_node, agent=creator_agent, name="Creator")
-genie_node = functools.partial(agent_node, agent=genie_agent, name="Genie")
+creator_node = functools.partial(
+    agent_node, 
+    agent=creator_agent, 
+    name="Creator")
+
+genie_node = functools.partial(
+    agent_node, 
+    agent=genie_agent, 
+    name="Genie")
 
 workflow = StateGraph(AgentState)
 workflow.add_node("Genie", genie_node)
@@ -151,6 +153,7 @@ workflow.add_node("supervisor", supervisor_agent)
 workflow.add_node("final_answer", final_answer)
 
 workflow.set_entry_point("supervisor")
+
 # We want our workers to ALWAYS "report back" to the supervisor when done
 for worker in worker_descriptions.keys():
     workflow.add_edge(worker, "supervisor")
@@ -167,7 +170,6 @@ multi_agent = workflow.compile()
 ###################################
 # Wrap our multi-agent in ChatAgent
 ###################################
-
 
 class LangGraphChatAgent(ChatAgent):
     def __init__(self, agent: CompiledStateGraph):
@@ -206,7 +208,6 @@ class LangGraphChatAgent(ChatAgent):
                     ChatAgentChunk(**{"delta": msg})
                     for msg in node_data.get("messages", [])
                 )
-
 
 # Create the agent object, and specify it as the agent object to use when
 # loading the agent back for inference via mlflow.models.set_model()
