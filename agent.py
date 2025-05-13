@@ -33,7 +33,6 @@ config = ModelConfig(development_config="config.yaml").to_dict()
 genie_agent = GenieAgent(
     genie_space_id=config['genie_space_id'],
     genie_agent_name="Genie",
-    description=config['genie_agent_description'],
     client=WorkspaceClient(
         host=os.getenv("DB_MODEL_SERVING_HOST_URL"),
         token=os.getenv("DATABRICKS_GENIE_PAT"),
