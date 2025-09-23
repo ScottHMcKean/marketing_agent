@@ -12,5 +12,5 @@ max_supervisor_worker_iterations: 3
 supervisor_agent_prompt: |
   Decide between routing between the following workers or ending the conversation if an answer is provided. If the user asks about historical info, opens, or how previous campaigns have performed use the Genie worker. If the user asks about creating new campaigns use the Creator worker.
 agent_name: 'marketing_agent'
-genie_space_id: 01f02c813fcd12ef9e0b286498358310
+genie_space_id: 01f097db94fd1e85bb2e11ef97e542cb
 vector_search_endpoint: one-env-shared-endpoint-3
