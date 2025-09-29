@@ -14,3 +14,4 @@ supervisor_agent_prompt: |
 agent_name: 'marketing_agent'
 genie_space_id: 01f097db94fd1e85bb2e11ef97e542cb
 vector_search_endpoint: one-env-shared-endpoint-3
+trace_experiment: /Workspace/Users/scott.mckean@databricks.com/experiments/marketing_agent

@@ -4,6 +4,7 @@ from typing import Any, Generator, Literal, Optional
 
 import mlflow
 from databricks.sdk import WorkspaceClient
+from databricks_ai_bridge import ModelServingUserCredentials
 from databricks_langchain import (
     ChatDatabricks,
     UCFunctionToolkit,
@@ -25,6 +26,11 @@ from pydantic import BaseModel
 from mlflow.models import ModelConfig
 
 config = ModelConfig(development_config="config.yaml").to_dict()
+mlflow.set_tracking_uri("databricks")
+mlflow.set_experiment(config.get('trace_experiment'))
+mlflow.langchain.autolog()
+
+user_client = WorkspaceClient(credentials_strategy=ModelServingUserCredentials())
 
 ###################################################
 ## Create a GenieAgent with access to a Genie Space
@@ -33,10 +39,8 @@ config = ModelConfig(development_config="config.yaml").to_dict()
 genie_agent = GenieAgent(
     genie_space_id=config['genie_space_id'],
     genie_agent_name="Genie",
-    client=WorkspaceClient(
-        host=os.getenv("DB_MODEL_SERVING_HOST_URL"),
-        token=os.getenv("DATABRICKS_GENIE_PAT"),
-    ),
+    description="An agent to look marketing campaign results",
+    client=user_client
 )
 
 ############################################
@@ -164,28 +168,25 @@ workflow.add_conditional_edges(
     {**{k: k for k in worker_descriptions.keys()}, "FINISH": "final_answer"},
 )
 workflow.add_edge("final_answer", END)
-multi_agent = workflow.compile()
 
 ###################################
 # Wrap our multi-agent in ChatAgent
 ###################################
 
 class LangGraphChatAgent(ChatAgent):
-    def __init__(self, agent: CompiledStateGraph):
-        self.agent = agent
-
     def predict(
         self,
         messages: list[ChatAgentMessage],
         context: Optional[ChatContext] = None,
         custom_inputs: Optional[dict[str, Any]] = None,
     ) -> ChatAgentResponse:
+        agent = workflow.compile() 
         request = {
             "messages": [m.model_dump_compat(exclude_none=True) for m in messages]
         }
 
         messages = []
-        for event in self.agent.stream(request, stream_mode="updates"):
+        for event in agent.stream(request, stream_mode="updates"):
             for node_data in event.values():
                 messages.extend(
                     ChatAgentMessage(**msg) for msg in node_data.get("messages", [])
@@ -198,10 +199,11 @@ class LangGraphChatAgent(ChatAgent):
         context: Optional[ChatContext] = None,
         custom_inputs: Optional[dict[str, Any]] = None,
     ) -> Generator[ChatAgentChunk, None, None]:
+        agent = workflow.compile()
         request = {
             "messages": [m.model_dump_compat(exclude_none=True) for m in messages]
         }
-        for event in self.agent.stream(request, stream_mode="updates"):
+        for event in agent.stream(request, stream_mode="updates"):
             for node_data in event.values():
                 yield from (
                     ChatAgentChunk(**{"delta": msg})
@@ -210,6 +212,6 @@ class LangGraphChatAgent(ChatAgent):
 
 # Create the agent object, and specify it as the agent object to use when
 # loading the agent back for inference via mlflow.models.set_model()
-mlflow.langchain.autolog()
-AGENT = LangGraphChatAgent(multi_agent)
+
+AGENT = LangGraphChatAgent()
 mlflow.models.set_model(AGENT)
